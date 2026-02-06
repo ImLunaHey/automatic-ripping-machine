@@ -69,7 +69,9 @@ from arm.models.system_info import SystemInfo
 from arm.models.system_drives import SystemDrives
 from arm.models.notifications import Notifications
 from arm.models.ui_settings import UISettings
+from arm.models.user import User
 from arm.ui.settings import DriveUtils as drive_utils
+import arm.ui.utils as ui_utils
 
 # Create API blueprint
 api = Blueprint('api', __name__, url_prefix='/api/v1')
@@ -1766,6 +1768,1002 @@ def history_statistics():
         ).count()
 
     return make_response(stats)
+
+
+# ==============================================================================
+# JOB TITLE/METADATA ENDPOINTS
+# ==============================================================================
+
+
+@api.route('/jobs/<int:job_id>/title', methods=['PATCH'])
+@api_auth_required
+def update_job_title(job_id):
+    """
+    Update Job Title and Metadata
+
+    Update a job's title, year, video type, IMDB ID, and poster URL.
+
+    Path Parameters:
+        - job_id (int): The unique identifier of the job
+
+    Request Body:
+        {
+            "title": "New Movie Title",
+            "year": "2023",
+            "video_type": "movie",  // or "series"
+            "imdb_id": "tt1234567",
+            "poster_url": "https://example.com/poster.jpg"
+        }
+
+    Returns:
+        Updated job details
+
+    Example Request:
+        PATCH /api/v1/jobs/123/title
+        Content-Type: application/json
+        {"title": "New Title", "year": "2024"}
+    """
+    job = Job.query.get(job_id)
+
+    if not job:
+        return error_response(f'Job with ID {job_id} not found', 404)
+
+    data = request.get_json()
+    if not data:
+        return error_response('Request body must be JSON', 400)
+
+    try:
+        if 'title' in data:
+            job.title = job.title_manual = ui_utils.clean_for_filename(data['title'])
+            job.hasnicetitle = True
+        if 'year' in data:
+            job.year = job.year_manual = str(data['year'])
+        if 'video_type' in data:
+            job.video_type = job.video_type_manual = data['video_type']
+        if 'imdb_id' in data:
+            job.imdb_id = job.imdb_id_manual = data['imdb_id']
+        if 'poster_url' in data:
+            job.poster_url = job.poster_url_manual = data['poster_url']
+
+        db.session.commit()
+
+        # Create notification
+        notification = Notifications(
+            f'Job {job_id} title updated',
+            f'Title: {job.title} ({job.year})'
+        )
+        db.session.add(notification)
+        db.session.commit()
+
+        return make_response(job_to_dict(job), 'Job title updated successfully')
+
+    except Exception as e:
+        db.session.rollback()
+        return error_response(f'Failed to update job title: {str(e)}', 500)
+
+
+@api.route('/jobs/<int:job_id>/params', methods=['PATCH'])
+@api_auth_required
+def update_job_params(job_id):
+    """
+    Update Job Parameters
+
+    Update ripping/transcoding parameters for a job.
+
+    Path Parameters:
+        - job_id (int): The unique identifier of the job
+
+    Request Body:
+        {
+            "disctype": "bluray",
+            "minlength": "600",
+            "maxlength": "99999",
+            "ripmethod": "mkv",
+            "mainfeature": true,
+            "skip_transcode": false
+        }
+
+    Returns:
+        Updated job config
+
+    Example Request:
+        PATCH /api/v1/jobs/123/params
+        Content-Type: application/json
+        {"ripmethod": "backup", "mainfeature": true}
+    """
+    job = Job.query.get(job_id)
+
+    if not job:
+        return error_response(f'Job with ID {job_id} not found', 404)
+
+    data = request.get_json()
+    if not data:
+        return error_response('Request body must be JSON', 400)
+
+    try:
+        config = job.config
+
+        if 'disctype' in data:
+            job.disctype = data['disctype']
+        if 'minlength' in data:
+            config.MINLENGTH = str(data['minlength'])
+            cfg.arm_config['MINLENGTH'] = config.MINLENGTH
+        if 'maxlength' in data:
+            config.MAXLENGTH = str(data['maxlength'])
+            cfg.arm_config['MAXLENGTH'] = config.MAXLENGTH
+        if 'ripmethod' in data:
+            config.RIPMETHOD = data['ripmethod']
+            cfg.arm_config['RIPMETHOD'] = config.RIPMETHOD
+        if 'mainfeature' in data:
+            config.MAINFEATURE = 1 if data['mainfeature'] else 0
+            cfg.arm_config['MAINFEATURE'] = config.MAINFEATURE
+        if 'skip_transcode' in data:
+            config.SKIP_TRANSCODE = data['skip_transcode']
+        if 'videotype' in data:
+            config.VIDEOTYPE = data['videotype']
+
+        db.session.commit()
+
+        return make_response(config_to_dict(config), 'Job parameters updated successfully')
+
+    except Exception as e:
+        db.session.rollback()
+        return error_response(f'Failed to update job params: {str(e)}', 500)
+
+
+@api.route('/jobs/<int:job_id>/tracks/batch', methods=['PATCH'])
+@api_auth_required
+def batch_update_tracks(job_id):
+    """
+    Batch Update Tracks
+
+    Update multiple tracks for a job in a single request.
+
+    Path Parameters:
+        - job_id (int): The unique identifier of the job
+
+    Request Body:
+        {
+            "tracks": [
+                {"track_id": 1, "process": true},
+                {"track_id": 2, "process": false}
+            ]
+        }
+
+    Returns:
+        Success message with count of updated tracks
+
+    Example Request:
+        PATCH /api/v1/jobs/123/tracks/batch
+        Content-Type: application/json
+        {"tracks": [{"track_id": 1, "process": true}, {"track_id": 2, "process": false}]}
+    """
+    job = Job.query.get(job_id)
+
+    if not job:
+        return error_response(f'Job with ID {job_id} not found', 404)
+
+    data = request.get_json()
+    if not data or 'tracks' not in data:
+        return error_response('Request body must contain "tracks" array', 400)
+
+    try:
+        updated_count = 0
+        for track_data in data['tracks']:
+            track_id = track_data.get('track_id')
+            if not track_id:
+                continue
+
+            track = Track.query.filter_by(
+                track_id=track_id,
+                job_id=job_id
+            ).first()
+
+            if track:
+                if 'process' in track_data:
+                    track.process = bool(track_data['process'])
+                if 'error' in track_data:
+                    track.error = str(track_data['error']) if track_data['error'] else None
+                updated_count += 1
+
+        db.session.commit()
+
+        # Mark job as ready to start if in manual mode
+        job.manual_start = True
+        db.session.commit()
+
+        return make_response({'updated': updated_count}, f'{updated_count} tracks updated')
+
+    except Exception as e:
+        db.session.rollback()
+        return error_response(f'Failed to update tracks: {str(e)}', 500)
+
+
+# ==============================================================================
+# METADATA ENDPOINTS
+# ==============================================================================
+
+
+@api.route('/metadata/search', methods=['GET'])
+@api_auth_required
+def search_metadata():
+    """
+    Search Metadata Providers
+
+    Search OMDB/TMDB for movie/TV show information.
+
+    Query Parameters:
+        - title (str): Search title (required)
+        - year (str): Release year (optional)
+        - provider (str): Provider to use (omdb, tmdb, auto - default: auto)
+
+    Returns:
+        Search results from metadata provider
+
+    Example Request:
+        GET /api/v1/metadata/search?title=Matrix&year=1999
+    """
+    title = request.args.get('title', '').strip()
+    year = request.args.get('year', '').strip()
+    provider = request.args.get('provider', 'auto')
+
+    if not title:
+        return error_response('Title parameter is required', 400)
+
+    try:
+        if provider in ('auto', 'omdb'):
+            results = ui_utils.metadata_selector('search', title, year)
+            if results and 'Search' in results:
+                return make_response(results)
+            if provider == 'omdb':
+                return error_response('No results found', 404)
+
+        if provider in ('auto', 'tmdb'):
+            results = ui_utils.metadata_selector('search', title, year)
+            if results and 'Search' in results:
+                return make_response(results)
+            if provider == 'tmdb':
+                return error_response('No results found', 404)
+
+        return error_response('No results found', 404)
+
+    except Exception as e:
+        return error_response(f'Metadata search failed: {str(e)}', 500)
+
+
+@api.route('/metadata/details', methods=['GET'])
+@api_auth_required
+def get_metadata_details():
+    """
+    Get Metadata Details
+
+    Get detailed metadata for a specific title using IMDB ID.
+
+    Query Parameters:
+        - imdb_id (str): IMDB ID (required, format: tt1234567)
+        - provider (str): Provider to use (omdb, tmdb, auto - default: auto)
+
+    Returns:
+        Detailed metadata including plot, poster, ratings
+
+    Example Request:
+        GET /api/v1/metadata/details?imdb_id=tt0133093
+    """
+    imdb_id = request.args.get('imdb_id', '').strip()
+    provider = request.args.get('provider', 'auto')
+
+    if not imdb_id:
+        return error_response('imdb_id parameter is required', 400)
+
+    try:
+        results = ui_utils.metadata_selector('get_details', None, None, imdb_id)
+
+        if results and 'Error' not in results:
+            return make_response(results)
+
+        return error_response('Could not fetch metadata details', 404)
+
+    except Exception as e:
+        return error_response(f'Metadata lookup failed: {str(e)}', 500)
+
+
+@api.route('/metadata/poster', methods=['GET'])
+@api_auth_required
+def get_metadata_poster():
+    """
+    Get Poster URL
+
+    Get the poster URL for a title.
+
+    Query Parameters:
+        - imdb_id (str): IMDB ID (optional)
+        - title (str): Title (optional, requires year)
+        - year (str): Release year (optional)
+        - provider (str): Provider (auto, omdb, tmdb)
+
+    Returns:
+        Poster URL and metadata
+
+    Example Request:
+        GET /api/v1/metadata/poster?imdb_id=tt0133093
+    """
+    imdb_id = request.args.get('imdb_id', '').strip()
+    title = request.args.get('title', '').strip()
+    year = request.args.get('year', '').strip()
+    provider = request.args.get('provider', 'auto')
+
+    try:
+        if imdb_id:
+            poster_data = ui_utils.metadata_selector('get_details', None, None, imdb_id)
+        elif title:
+            poster_data = ui_utils.metadata_selector('search', title, year)
+            if poster_data and 'Search' in poster_data and len(poster_data['Search']) > 0:
+                imdb_id = poster_data['Search'][0].get('imdbID')
+                if imdb_id:
+                    poster_data = ui_utils.metadata_selector('get_details', None, None, imdb_id)
+        else:
+            return error_response('Either imdb_id or title is required', 400)
+
+        if poster_data and 'Poster' in poster_data:
+            return make_response({
+                'poster_url': poster_data['Poster'],
+                'title': poster_data.get('Title'),
+                'imdb_id': imdb_id
+            })
+
+        return error_response('Poster not found', 404)
+
+    except Exception as e:
+        return error_response(f'Poster lookup failed: {str(e)}', 500)
+
+
+# ==============================================================================
+# SEND/EXPORT ENDPOINTS
+# ==============================================================================
+
+
+@api.route('/send/movies', methods=['POST'])
+@api_auth_required
+def send_movies():
+    """
+    Send Movies to Remote API
+
+    Send DVD job CRC IDs to the ARM remote database API.
+
+    Request Body (optional):
+        {
+            "job_ids": [1, 2, 3]  // specific jobs, or send all if omitted
+        }
+
+    Returns:
+        List of job IDs that were/would be sent
+
+    Example Request:
+        POST /api/v1/send/movies
+        Content-Type: application/json
+        {"job_ids": [1, 2, 3]}
+    """
+    data = request.get_json() or {}
+    job_ids = data.get('job_ids')
+
+    try:
+        if job_ids:
+            job_list = Job.query.filter(
+                Job.job_id.in_(job_ids),
+                Job.hasnicetitle == True,
+                Job.disctype == 'dvd'
+            ).all()
+        else:
+            job_list = Job.query.filter_by(hasnicetitle=True, disctype='dvd').all()
+
+        return_job_list = [job.job_id for job in job_list]
+
+        # Actually send to remote API if requested
+        if request.args.get('execute', 'false').lower() == 'true':
+            results = []
+            for job_id in return_job_list:
+                try:
+                    ui_utils.send_to_remote_db(job_id)
+                    results.append({'job_id': job_id, 'status': 'sent'})
+                except Exception as e:
+                    results.append({'job_id': job_id, 'status': 'error', 'error': str(e)})
+            return make_response({'results': results}, f'Sent {len([r for r in results if r["status"] == "sent"])} jobs')
+
+        return make_response({
+            'jobs': return_job_list,
+            'count': len(return_job_list),
+            'execute': 'Set ?execute=true to actually send to remote API'
+        })
+
+    except Exception as e:
+        return error_response(f'Failed to get jobs for sending: {str(e)}', 500)
+
+
+# ==============================================================================
+# SETTINGS WRITE ENDPOINTS
+# ==============================================================================
+
+
+@api.route('/settings/arm', methods=['POST'])
+@admin_required
+def save_arm_settings():
+    """
+    Save ARM Configuration
+
+    Update ARM configuration settings.
+
+    Request Body:
+        JSON object with ARM configuration keys and values.
+        Sensitive keys (API keys, passwords) will be accepted but hidden.
+
+    Returns:
+        Success message and updated config
+
+    Example Request:
+        POST /api/v1/settings/arm
+        Content-Type: application/json
+        {"ARM_NAME": "My ARM", "LOGLEVEL": "DEBUG"}
+    """
+    import importlib
+
+    data = request.get_json()
+    if not data:
+        return error_response('Request body must be JSON', 400)
+
+    try:
+        # Get comments for arm.yaml
+        comments = ui_utils.generate_comments()
+
+        # Build new config
+        arm_cfg = ui_utils.build_arm_cfg(data, comments)
+
+        # Save to file
+        with open(cfg.arm_config_path, 'w') as f:
+            f.write(arm_cfg)
+
+        # Reload config
+        importlib.reload(cfg)
+
+        return make_response(cfg.arm_config, 'ARM settings saved successfully. Restart required for some changes.')
+
+    except Exception as e:
+        return error_response(f'Failed to save settings: {str(e)}', 500)
+
+
+@api.route('/settings/abcde', methods=['POST'])
+@admin_required
+def save_abcde_settings():
+    """
+    Save ABCDE Configuration
+
+    Update ABCDE (audio CD ripper) configuration.
+
+    Request Body:
+        {
+            "config": "完整的abcde.conf内容..."
+        }
+
+    Returns:
+        Success message
+
+    Example Request:
+        POST /api/v1/settings/abcde
+        Content-Type: application/json
+        {"config": "abcde.conf 内容..."}
+    """
+    data = request.get_json()
+    if not data or 'config' not in data:
+        return error_response('Request body must contain "config" field', 400)
+
+    try:
+        abcde_cfg_str = data['config']
+        # Clean Windows line endings
+        clean_cfg = '\n'.join(abcde_cfg_str.splitlines())
+
+        with open(cfg.abcde_config_path, 'w') as f:
+            f.write(clean_cfg)
+
+        cfg.abcde_config = clean_cfg
+
+        return make_response(None, 'ABCDE config saved successfully')
+
+    except Exception as e:
+        return error_response(f'Failed to save ABCDE config: {str(e)}', 500)
+
+
+@api.route('/settings/apprise', methods=['POST'])
+@admin_required
+def save_apprise_settings():
+    """
+    Save Apprise Configuration
+
+    Update Apprise notification configuration.
+
+    Request Body:
+        JSON object with apprise configuration keys and values.
+
+    Returns:
+        Success message
+
+    Example Request:
+        POST /api/v1/settings/apprise
+        Content-Type: application/json
+        {"tvs://emby_server:emby_port/"}
+    """
+    import importlib
+
+    data = request.get_json()
+    if not data:
+        return error_response('Request body must be JSON', 400)
+
+    try:
+        # Build new apprise config
+        apprise_cfg = ui_utils.build_apprise_cfg(data)
+
+        with open(cfg.apprise_config_path, 'w') as f:
+            f.write(apprise_cfg)
+
+        importlib.reload(cfg)
+
+        return make_response(cfg.apprise_config, 'Apprise config saved successfully')
+
+    except Exception as e:
+        return error_response(f'Failed to save Apprise config: {str(e)}', 500)
+
+
+# ==============================================================================
+# DRIVE MANAGEMENT ENDPOINTS
+# ==============================================================================
+
+
+@api.route('/system/drives/<int:drive_id>/remove', methods=['DELETE'])
+@admin_required
+def remove_drive(drive_id):
+    """
+    Remove Drive
+
+    Remove a drive from the ARM database.
+
+    Path Parameters:
+        - drive_id (int): The unique identifier of the drive
+
+    Returns:
+        Success message
+
+    Example Request:
+        DELETE /api/v1/system/drives/1/remove
+    """
+    try:
+        drive = SystemDrives.query.filter_by(drive_id=drive_id).first()
+
+        if not drive:
+            return error_response(f'Drive {drive_id} not found', 404)
+
+        dev_path = drive.mount
+        SystemDrives.query.filter_by(drive_id=drive_id).delete()
+        db.session.commit()
+
+        return make_response(None, f'Drive {dev_path} removed from ARM')
+
+    except Exception as e:
+        db.session.rollback()
+        return error_response(f'Failed to remove drive: {str(e)}', 500)
+
+
+@api.route('/system/drives/<int:drive_id>/start', methods=['POST'])
+@admin_required
+def manual_start_job(drive_id):
+    """
+    Manually Start Job
+
+    Manually start a ripping job on a specific drive.
+
+    Path Parameters:
+        - drive_id (int): The unique identifier of the drive
+
+    Returns:
+        Success or error message
+
+    Example Request:
+        POST /api/v1/system/drives/1/start
+    """
+    import subprocess
+
+    try:
+        drive = SystemDrives.query.filter_by(drive_id=drive_id).first()
+
+        if not drive:
+            return error_response(f'Drive {drive_id} not found', 404)
+
+        dev_path = drive.mount.lstrip('/dev/')
+
+        cmd = os.path.join(
+            cfg.arm_config['INSTALLPATH'],
+            f'scripts/docker/docker_arm_wrapper.sh {dev_path}'
+        )
+
+        process = subprocess.Popen(
+            cmd,
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        stdout, stderr = process.communicate()
+
+        if process.returncode != 0:
+            raise subprocess.CalledProcessError(process.returncode, cmd, output=stdout, stderr=stderr)
+
+        return make_response({'output': stdout}, f'Manually started job on drive {drive.name}')
+
+    except subprocess.CalledProcessError as e:
+        return error_response(f'Failed to start job: {e.stderr}', 500)
+    except Exception as e:
+        return error_response(f'Failed to start job: {str(e)}', 500)
+
+
+@api.route('/system/drives/scan', methods=['POST'])
+@admin_required
+def scan_drives():
+    """
+    Scan for Drives
+
+    Scan the system for optical drives and update the database.
+
+    Returns:
+        Number of new drives found
+
+    Example Request:
+        POST /api/v1/system/drives/scan
+    """
+    try:
+        new_count = drive_utils.drives_update()
+        return make_response({'new_drives': new_count}, f'Found {new_count} new drives')
+
+    except Exception as e:
+        return error_response(f'Failed to scan drives: {str(e)}', 500)
+
+
+@api.route('/system/drives/<int:drive_id>', methods=['PATCH'])
+@admin_required
+def update_drive(drive_id):
+    """
+    Update Drive
+
+    Update drive information (name, description, mode).
+
+    Path Parameters:
+        - drive_id (int): The unique identifier of the drive
+
+    Request Body:
+        {
+            "name": "Primary Blu-ray",
+            "description": "Main ripping drive",
+            "drive_mode": "auto"
+        }
+
+    Returns:
+        Updated drive information
+
+    Example Request:
+        PATCH /api/v1/system/drives/1
+        Content-Type: application/json
+        {"name": "Primary Blu-ray", "drive_mode": "manual"}
+    """
+    drive = SystemDrives.query.filter_by(drive_id=drive_id).first()
+
+    if not drive:
+        return error_response(f'Drive {drive_id} not found', 404)
+
+    data = request.get_json()
+    if not data:
+        return error_response('Request body must be JSON', 400)
+
+    try:
+        if 'name' in data:
+            drive.name = str(data['name']).strip()
+        if 'description' in data:
+            drive.description = str(data['description']).strip()
+        if 'drive_mode' in data:
+            drive.drive_mode = str(data['drive_mode']).strip()
+
+        db.session.commit()
+
+        return make_response(drive_to_dict(drive), 'Drive updated successfully')
+
+    except Exception as e:
+        db.session.rollback()
+        return error_response(f'Failed to update drive: {str(e)}', 500)
+
+
+# ==============================================================================
+# DATABASE ENDPOINTS
+# ==============================================================================
+
+
+@api.route('/database', methods=['GET'])
+@api_auth_required
+def get_database_info():
+    """
+    Get Database Information
+
+    Retrieve database status and information.
+
+    Returns:
+        Database information including version, existence status
+    """
+    try:
+        db_update = ui_utils.arm_db_check()
+
+        return make_response({
+            'exists': db_update.get('db_exists', False),
+            'current': db_update.get('db_current', False),
+            'version': db_update.get('db_version', None),
+            'required_version': db_update.get('db_required_version', None)
+        })
+
+    except Exception as e:
+        return error_response(f'Failed to get database info: {str(e)}', 500)
+
+
+@api.route('/database/update', methods=['POST'])
+@admin_required
+def update_database():
+    """
+    Update Database
+
+    Run database migrations to update schema.
+
+    Returns:
+        Success message
+
+    Example Request:
+        POST /api/v1/database/update
+    """
+    try:
+        from arm.ui.utils import arm_db_migrate
+
+        success = arm_db_migrate()
+
+        if success:
+            return make_response(None, 'Database updated successfully')
+        else:
+            return error_response('Database update failed', 500)
+
+    except Exception as e:
+        return error_response(f'Database update failed: {str(e)}', 500)
+
+
+@api.route('/database/import', methods=['POST'])
+@admin_required
+def import_movies():
+    """
+    Import Movies
+
+    Import missing movie information from disc metadata.
+
+    Request Body (optional):
+        {
+            "job_ids": [1, 2, 3]  // specific jobs, or all if omitted
+        }
+
+    Returns:
+        Import results
+
+    Example Request:
+        POST /api/v1/database/import
+        Content-Type: application/json
+        {"job_ids": [1, 2, 3]}
+    """
+    from arm.ui.utils import import_movie_add
+
+    data = request.get_json() or {}
+    job_ids = data.get('job_ids')
+
+    try:
+        if job_ids:
+            jobs = Job.query.filter(Job.job_id.in_(job_ids)).all()
+        else:
+            jobs = Job.query.filter(
+                Job.hasnicetitle == True,
+                Job.disctype == 'dvd'
+            ).all()
+
+        results = []
+        for job in jobs:
+            try:
+                poster = job.poster_url if job.poster_url else None
+                my_path = ui_utils.find_folder_in_log(job.logfile, cfg.arm_config['COMPLETED_PATH'])
+                if my_path:
+                    result = import_movie_add(poster, job.imdb_id, job.video_type, my_path)
+                    results.append({'job_id': job.job_id, 'status': 'imported' if result else 'skipped'})
+            except Exception as e:
+                results.append({'job_id': job.job_id, 'status': 'error', 'error': str(e)})
+
+        return make_response({'results': results}, f'Imported {len([r for r in results if r["status"] == "imported"])} movies')
+
+    except Exception as e:
+        return error_response(f'Import failed: {str(e)}', 500)
+
+
+# ==============================================================================
+# SYSTEM ENDPOINTS
+# ==============================================================================
+
+
+@api.route('/system/sysinfo', methods=['POST'])
+@admin_required
+def update_system_info():
+    """
+    Update System Information
+
+    Refresh system information in the database.
+
+    Returns:
+        Success message
+
+    Example Request:
+        POST /api/v1/system/sysinfo
+    """
+    try:
+        current_system = SystemInfo.query.first()
+        new_system = SystemInfo()
+
+        if current_system:
+            current_system.name = new_system.name
+            current_system.cpu = new_system.cpu
+            current_system.mem_total = new_system.mem_total
+            db.session.add(current_system)
+        else:
+            db.session.add(new_system)
+
+        db.session.commit()
+
+        return make_response(None, 'System info updated')
+
+    except Exception as e:
+        db.session.rollback()
+        return error_response(f'Failed to update system info: {str(e)}', 500)
+
+
+@api.route('/system/test-apprise', methods=['POST'])
+@admin_required
+def test_apprise():
+    """
+    Test Apprise Notification
+
+    Send a test notification via Apprise.
+
+    Returns:
+        Success message
+
+    Example Request:
+        POST /api/v1/system/test-apprise
+    """
+    from arm.ripper import utils as ripper_utils
+
+    try:
+        message = 'ARM API Test Notification'
+        if cfg.arm_config.get('UI_BASE_URL') and cfg.arm_config.get('WEBSERVER_PORT'):
+            message += f' Server URL: http://{cfg.arm_config["UI_BASE_URL"]}:{cfg.arm_config["WEBSERVER_PORT"]}'
+
+        ripper_utils.notify(None, 'ARM notification', message)
+
+        return make_response(None, 'Test notification sent')
+
+    except Exception as e:
+        return error_response(f'Failed to send test notification: {str(e)}', 500)
+
+
+@api.route('/system/restart', methods=['POST'])
+@admin_required
+def restart_arm():
+    """
+    Restart ARM UI
+
+    Restart the ARM web interface.
+
+    Returns:
+        Success message (UI will restart after this)
+
+    Example Request:
+        POST /api/v1/system/restart
+    """
+    import subprocess
+
+    try:
+        subprocess.Popen('pkill python3', shell=True)
+        return make_response(None, 'ARM restart initiated')
+
+    except Exception as e:
+        return error_response(f'Failed to restart ARM: {str(e)}', 500)
+
+
+# ==============================================================================
+# USER ENDPOINTS
+# ==============================================================================
+
+
+@api.route('/user/status', methods=['GET'])
+@api_auth_required
+def get_user_status():
+    """
+    Get Current User Status
+
+    Get information about the currently authenticated user.
+
+    Returns:
+        User information
+    """
+    user = g.user if hasattr(g, 'user') and g.user != 'api_key_auth' else current_user
+
+    if user and user.is_authenticated:
+        return make_response({
+            'authenticated': True,
+            'email': user.email,
+            'user_id': user.user_id
+        })
+
+    # API key auth
+    return make_response({
+        'authenticated': True,
+        'method': 'api_key',
+        'email': None
+    })
+
+
+@api.route('/user/password', methods=['POST'])
+@api_auth_required
+def change_password():
+    """
+    Change Password
+
+    Change the admin password.
+
+    Request Body:
+        {
+            "old_password": "current_password",
+            "new_password": "new_password"
+        }
+
+    Returns:
+        Success message
+
+    Example Request:
+        POST /api/v1/user/password
+        Content-Type: application/json
+        {"old_password": "old", "new_password": "new"}
+    """
+    import bcrypt
+
+    data = request.get_json()
+    if not data or 'old_password' not in data or 'new_password' not in data:
+        return error_response('old_password and new_password are required', 400)
+
+    user = User.query.first()
+    if not user:
+        return error_response('No user found', 404)
+
+    try:
+        old_pw = data['old_password'].strip().encode('utf-8')
+        new_pw = data['new_password'].strip().encode('utf-8')
+
+        # Verify old password
+        login_hashed = bcrypt.hashpw(old_pw, user.hash)
+        if login_hashed != user.password:
+            return error_response('Current password is incorrect', 401)
+
+        # Set new password
+        hashed = bcrypt.gensalt()
+        user.password = bcrypt.hashpw(new_pw, hashed)
+        user.hash = hashed
+        db.session.commit()
+
+        return make_response(None, 'Password updated successfully. Please log in again.')
+
+    except Exception as e:
+        db.session.rollback()
+        return error_response(f'Failed to change password: {str(e)}', 500)
 
 
 # ==============================================================================

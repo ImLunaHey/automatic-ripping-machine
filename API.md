@@ -581,6 +581,113 @@ curl -H "Authorization: Bearer YOUR_KEY" \
 
 ---
 
+### Job Title/Metadata Operations
+
+#### PATCH /jobs/{job_id}/title
+
+Update a job's title, year, video type, IMDB ID, and poster URL.
+
+**Authentication:** Required
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `job_id` | integer | The unique identifier of the job |
+
+**Request Body:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `title` | string | New movie/show title |
+| `year` | string | Release year |
+| `video_type` | string | Type (movie, series) |
+| `imdb_id` | string | IMDB ID (tt1234567) |
+| `poster_url` | string | Poster image URL |
+
+**Example Request:**
+
+```bash
+curl -X PATCH \
+     -H "Authorization: Bearer YOUR_KEY" \
+     -H "Content-Type: application/json" \
+     "http://localhost:8000/api/v1/jobs/123/title" \
+     -d '{"title": "New Movie Title", "year": "2024"}'
+```
+
+---
+
+#### PATCH /jobs/{job_id}/params
+
+Update ripping/transcoding parameters for a job.
+
+**Authentication:** Required
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `job_id` | integer | The unique identifier of the job |
+
+**Request Body:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `disctype` | string | Disc type (bluray, dvd, music, data) |
+| `minlength` | string | Minimum track length (seconds) |
+| `maxlength` | string | Maximum track length (seconds) |
+| `ripmethod` | string | Rip method (mkv, backup) |
+| `mainfeature` | boolean | Main feature only |
+| `skip_transcode` | boolean | Skip transcoding |
+| `videotype` | string | Video type (auto, movie, series) |
+
+**Example Request:**
+
+```bash
+curl -X PATCH \
+     -H "Authorization: Bearer YOUR_KEY" \
+     -H "Content-Type: application/json" \
+     "http://localhost:8000/api/v1/jobs/123/params" \
+     -d '{"ripmethod": "backup", "mainfeature": true}'
+```
+
+---
+
+#### PATCH /jobs/{job_id}/tracks/batch
+
+Update multiple tracks for a job in a single request.
+
+**Authentication:** Required
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `job_id` | integer | The unique identifier of the job |
+
+**Request Body:**
+
+```json
+{
+    "tracks": [
+        {"track_id": 1, "process": true},
+        {"track_id": 2, "process": false}
+    ]
+}
+```
+
+**Example Request:**
+
+```bash
+curl -X PATCH \
+     -H "Authorization: Bearer YOUR_KEY" \
+     -H "Content-Type: application/json" \
+     "http://localhost:8000/api/v1/jobs/123/tracks/batch" \
+     -d '{"tracks": [{"track_id": 1, "process": true}]}'
+```
+
+---
+
 ### Tracks
 
 Tracks represent individual titles/chapters on a disc. Each job can have multiple tracks.
@@ -868,6 +975,146 @@ curl -X POST \
 
 ---
 
+#### PATCH /system/drives/{drive_id}
+
+Update drive information (name, description, drive mode).
+
+**Authentication:** Required (Admin)
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `drive_id` | integer | The unique identifier of the drive |
+
+**Request Body:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | User-defined name for the drive |
+| `description` | string | Description of the drive |
+| `drive_mode` | string | Operation mode (auto, manual) |
+
+**Example Request:**
+
+```bash
+curl -X PATCH \
+     -H "Authorization: Bearer YOUR_ADMIN_KEY" \
+     -H "Content-Type: application/json" \
+     "http://localhost:8000/api/v1/system/drives/1" \
+     -d '{"name": "Primary Blu-ray", "drive_mode": "manual"}'
+```
+
+---
+
+#### DELETE /system/drives/{drive_id}/remove
+
+Remove a drive from the ARM database.
+
+**Authentication:** Required (Admin)
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `drive_id` | integer | The unique identifier of the drive |
+
+**Example Request:**
+
+```bash
+curl -X DELETE \
+     -H "Authorization: Bearer YOUR_ADMIN_KEY" \
+     "http://localhost:8000/api/v1/system/drives/1/remove"
+```
+
+---
+
+#### POST /system/drives/{drive_id}/start
+
+Manually start a ripping job on a specific drive.
+
+**Authentication:** Required (Admin)
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `drive_id` | integer | The unique identifier of the drive |
+
+**Example Request:**
+
+```bash
+curl -X POST \
+     -H "Authorization: Bearer YOUR_ADMIN_KEY" \
+     "http://localhost:8000/api/v1/system/drives/1/start"
+```
+
+---
+
+#### POST /system/drives/scan
+
+Scan the system for optical drives and update the database.
+
+**Authentication:** Required (Admin)
+
+**Example Request:**
+
+```bash
+curl -X POST \
+     -H "Authorization: Bearer YOUR_ADMIN_KEY" \
+     "http://localhost:8000/api/v1/system/drives/scan"
+```
+
+---
+
+#### POST /system/sysinfo
+
+Refresh system information in the database.
+
+**Authentication:** Required (Admin)
+
+**Example Request:**
+
+```bash
+curl -X POST \
+     -H "Authorization: Bearer YOUR_ADMIN_KEY" \
+     "http://localhost:8000/api/v1/system/sysinfo"
+```
+
+---
+
+#### POST /system/test-apprise
+
+Send a test notification via Apprise.
+
+**Authentication:** Required (Admin)
+
+**Example Request:**
+
+```bash
+curl -X POST \
+     -H "Authorization: Bearer YOUR_ADMIN_KEY" \
+     "http://localhost:8000/api/v1/system/test-apprise"
+```
+
+---
+
+#### POST /system/restart
+
+Restart the ARM web interface.
+
+**Authentication:** Required (Admin)
+
+**Example Request:**
+
+```bash
+curl -X POST \
+     -H "Authorization: Bearer YOUR_ADMIN_KEY" \
+     "http://localhost:8000/api/v1/system/restart"
+```
+
+---
+
 ### Settings
 
 Settings endpoints allow reading and modifying ARM configuration.
@@ -998,6 +1245,280 @@ Retrieve the Apprise notification configuration.
 ```bash
 curl -H "Authorization: Bearer YOUR_KEY" \
      "http://localhost:8000/api/v1/settings/apprise"
+```
+
+---
+
+#### POST /settings/arm
+
+Save ARM configuration settings.
+
+**Authentication:** Required (Admin)
+
+**Request Body:**
+
+JSON object with ARM configuration keys and values. See `/settings` for available keys.
+
+**Example Request:**
+
+```bash
+curl -X POST \
+     -H "Authorization: Bearer YOUR_ADMIN_KEY" \
+     -H "Content-Type: application/json" \
+     "http://localhost:8000/api/v1/settings/arm" \
+     -d '{"ARM_NAME": "My ARM", "LOGLEVEL": "DEBUG"}'
+```
+
+---
+
+#### POST /settings/abcde
+
+Save ABCDE (audio CD ripper) configuration.
+
+**Authentication:** Required (Admin)
+
+**Request Body:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `config` | string | Complete ABCDE configuration file content |
+
+**Example Request:**
+
+```bash
+curl -X POST \
+     -H "Authorization: Bearer YOUR_ADMIN_KEY" \
+     -H "Content-Type: application/json" \
+     "http://localhost:8000/api/v1/settings/abcde" \
+     -d '{"config": "abcde.conf 内容..."}'
+```
+
+---
+
+#### POST /settings/apprise
+
+Save Apprise notification configuration.
+
+**Authentication:** Required (Admin)
+
+**Request Body:**
+
+JSON object with apprise configuration.
+
+**Example Request:**
+
+```bash
+curl -X POST \
+     -H "Authorization: Bearer YOUR_ADMIN_KEY" \
+     -H "Content-Type: application/json" \
+     "http://localhost:8000/api/v1/settings/apprise" \
+     -d '{"tvs://emby_server:emby_port/": {"emby_apikey": "your_key"}}'
+```
+
+---
+
+### Metadata
+
+Search and retrieve metadata from OMDB/TMDB.
+
+#### GET /metadata/search
+
+Search OMDB/TMDB for movie/TV show information.
+
+**Authentication:** Required
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `title` | string | Yes | Search title |
+| `year` | string | No | Release year |
+| `provider` | string | No | Provider (omdb, tmdb, auto - default: auto) |
+
+**Example Request:**
+
+```bash
+curl -H "Authorization: Bearer YOUR_KEY" \
+     "http://localhost:8000/api/v1/metadata/search?title=Matrix&year=1999"
+```
+
+---
+
+#### GET /metadata/details
+
+Get detailed metadata for a specific title using IMDB ID.
+
+**Authentication:** Required
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `imdb_id` | string | Yes | IMDB ID (format: tt1234567) |
+| `provider` | string | No | Provider (omdb, tmdb, auto) |
+
+**Example Request:**
+
+```bash
+curl -H "Authorization: Bearer YOUR_KEY" \
+     "http://localhost:8000/api/v1/metadata/details?imdb_id=tt0133093"
+```
+
+---
+
+#### GET /metadata/poster
+
+Get the poster URL for a title.
+
+**Authentication:** Required
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `imdb_id` | string | No* | IMDB ID (required if title not provided) |
+| `title` | string | No* | Title (requires year) |
+| `year` | string | No | Release year |
+| `provider` | string | No | Provider |
+
+**Example Request:**
+
+```bash
+curl -H "Authorization: Bearer YOUR_KEY" \
+     "http://localhost:8000/api/v1/metadata/poster?imdb_id=tt0133093"
+```
+
+---
+
+### Send/Export
+
+#### POST /send/movies
+
+Send DVD job CRC IDs to the ARM remote database API.
+
+**Authentication:** Required
+
+**Request Body (optional):**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `job_ids` | array | Specific job IDs to send (sends all if omitted) |
+
+**Query Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `execute` | boolean | Set to "true" to actually send (default: false) |
+
+**Example Request:**
+
+```bash
+# Get list of jobs that would be sent
+curl -X POST \
+     -H "Authorization: Bearer YOUR_KEY" \
+     "http://localhost:8000/api/v1/send/movies"
+
+# Actually send jobs
+curl -X POST \
+     -H "Authorization: Bearer YOUR_KEY" \
+     "http://localhost:8000/api/v1/send/movies?execute=true"
+```
+
+---
+
+### Database
+
+#### GET /database
+
+Get database status and information.
+
+**Authentication:** Required
+
+**Example Request:**
+
+```bash
+curl -H "Authorization: Bearer YOUR_KEY" \
+     "http://localhost:8000/api/v1/database"
+```
+
+---
+
+#### POST /database/update
+
+Run database migrations to update schema.
+
+**Authentication:** Required (Admin)
+
+**Example Request:**
+
+```bash
+curl -X POST \
+     -H "Authorization: Bearer YOUR_ADMIN_KEY" \
+     "http://localhost:8000/api/v1/database/update"
+```
+
+---
+
+#### POST /database/import
+
+Import missing movie information from disc metadata.
+
+**Authentication:** Required (Admin)
+
+**Request Body (optional):**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `job_ids` | array | Specific job IDs to import |
+
+**Example Request:**
+
+```bash
+curl -X POST \
+     -H "Authorization: Bearer YOUR_ADMIN_KEY" \
+     "http://localhost:8000/api/v1/database/import"
+```
+
+---
+
+### User
+
+#### GET /user/status
+
+Get information about the currently authenticated user.
+
+**Authentication:** Required
+
+**Example Request:**
+
+```bash
+curl -H "Authorization: Bearer YOUR_KEY" \
+     "http://localhost:8000/api/v1/user/status"
+```
+
+---
+
+#### POST /user/password
+
+Change the admin password.
+
+**Authentication:** Required
+
+**Request Body:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `old_password` | string | Current password |
+| `new_password` | string | New password |
+
+**Example Request:**
+
+```bash
+curl -X POST \
+     -H "Authorization: Bearer YOUR_KEY" \
+     -H "Content-Type: application/json" \
+     "http://localhost:8000/api/v1/user/password" \
+     -d '{"old_password": "old", "new_password": "new"}'
 ```
 
 ---
