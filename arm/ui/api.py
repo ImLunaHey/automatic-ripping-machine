@@ -98,28 +98,28 @@ def api_auth_required(f):
             return f(*args, **kwargs)
 
         # Check for API key in Authorization header
+        # ARM uses a global ARM_API_KEY from config, not per-user keys
         auth_header = request.headers.get('Authorization')
         if auth_header and auth_header.startswith('Bearer '):
             api_key = auth_header[7:]  # Remove 'Bearer ' prefix
-            from arm.models.user import User
-            user = User.query.filter_by(api_key=api_key).first()
-            if user:
-                g.user = user
+            # Validate against the global ARM_API_KEY from config
+            valid_key = cfg.arm_config.get('ARM_API_KEY', '')
+            if api_key == valid_key and valid_key:
+                g.user = 'api_key_auth'
                 return f(*args, **kwargs)
 
         # Also allow api_key as query parameter (for simple integrations)
         api_key_param = request.args.get('api_key')
         if api_key_param:
-            from arm.models.user import User
-            user = User.query.filter_by(api_key=api_key_param).first()
-            if user:
-                g.user = user
+            valid_key = cfg.arm_config.get('ARM_API_KEY', '')
+            if api_key_param == valid_key and valid_key:
+                g.user = 'api_key_auth'
                 return f(*args, **kwargs)
 
         return jsonify({
             'success': False,
             'error': 'Authentication required',
-            'message': 'Please login or provide a valid API key'
+            'message': 'Please login or provide a valid API key (ARM_API_KEY from config)'
         }), 401
 
     return decorated
@@ -129,29 +129,29 @@ def admin_required(f):
     """
     Decorator that requires admin authentication for API endpoints.
 
-    Ensures the authenticated user has admin privileges.
+    In ARM, all users are admins (there's only one user account).
+    This decorator checks for valid session or API key authentication.
 
     Returns:
-        - 403 Forbidden if not admin
-        - Proceeds to wrapped function if admin
+        - 403 Forbidden if not authenticated
+        - Proceeds to wrapped function if authenticated
     """
     @wraps(f)
     def decorated(*args, **kwargs):
-        if not hasattr(g, 'user') or not g.user or not g.user.is_authenticated:
-            if current_user.is_authenticated:
-                g.user = current_user
-            else:
-                return jsonify({
-                    'success': False,
-                    'error': 'Admin authentication required',
-                    'message': 'This endpoint requires admin privileges'
-                }), 403
+        # Check if user is authenticated via session or valid API key
+        is_authenticated = False
 
-        if not getattr(g.user, 'is_admin', False):
+        if current_user.is_authenticated:
+            g.user = current_user
+            is_authenticated = True
+        elif hasattr(g, 'user') and g.user == 'api_key_auth':
+            is_authenticated = True
+
+        if not is_authenticated:
             return jsonify({
                 'success': False,
-                'error': 'Admin privileges required',
-                'message': 'You do not have permission to access this resource'
+                'error': 'Admin authentication required',
+                'message': 'This endpoint requires admin privileges. Please login or provide a valid API key.'
             }), 403
 
         return f(*args, **kwargs)

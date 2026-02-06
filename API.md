@@ -60,12 +60,19 @@ http://your-arm-server:8000/api/v1/jobs?api_key=YOUR_API_KEY
 
 ### Getting an API Key
 
-API keys are generated and managed through the ARM user interface:
+ARM uses a global API key configured in your `arm.yaml` configuration file:
 
-1. Log into the ARM web interface
-2. Navigate to Settings → Users
-3. Create or edit a user account
-4. Generate or view the API key for that user
+1. Edit your ARM configuration file (typically `/etc/arm/config/arm.yaml`)
+2. Find or add the `ARM_API_KEY` setting
+3. Set your desired API key value:
+
+```yaml
+ARM_API_KEY: "your-secure-api-key-here"
+```
+
+4. Restart ARM for changes to take effect
+
+**Note:** The API key is optional. If `ARM_API_KEY` is empty or not set, Bearer token authentication will be disabled and only session authentication will work.
 
 ### Authentication Required vs. Public Endpoints
 
